@@ -49,6 +49,16 @@ legacy Microsoft stack. All patient data is fake.
   no namespaces and a repeated name breaks every page.
 - Styles live in web/assets/css/app.css. No inline style or script (CSP).
 
+## Tooling
+- tools/run-local.ps1: start LocalDB + IIS Express on web/ (http://localhost:8080).
+  -RebuildDatabase recreates the database and config/hospital.udl.
+- tests/asp-syntax-check.ps1: compile-only check of every page. Runs
+  automatically after each Edit/Write of web/*.asp|asa (hook in
+  .claude/settings.json).
+- tests/e2e-security.ps1: HTTP security checks against the running site
+  (password from LEGACYHOSPITAL_SEED_PASSWORD). To be ported to xUnit.
+- Skills: /run-local, /new-page, /asp-review (.claude/skills/).
+
 ## Code style
 - Option Explicit at the top of every .asp file.
 - Response.CodePage = 65001 and Response.Charset = "utf-8" (set once in
