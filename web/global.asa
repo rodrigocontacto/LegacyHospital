@@ -1,0 +1,19 @@
+<SCRIPT LANGUAGE="VBScript" RUNAT="Server">
+' =====================================================================
+' global.asa - Application and session events.
+'
+' The connection string is NOT loaded here: db.asp reads it from
+' config\hospital.udl on each connection (option chosen in part 3).
+' IIS never serves .asa files, but keep secrets out of this file anyway.
+' Any change to this file restarts the application (ends all sessions).
+' =====================================================================
+
+Sub Application_OnStart
+End Sub
+
+Sub Session_OnStart
+    ' Idle timeout in minutes. After it, the user must sign in again.
+    Session.Timeout = 20
+End Sub
+
+</SCRIPT>
