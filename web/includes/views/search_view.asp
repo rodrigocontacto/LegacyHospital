@@ -11,7 +11,8 @@ WriteLayoutTop "Patients", "patients"
 </div>
 
 <section class="card">
-  <form method="get" action="/search.asp" role="search" class="search-form">
+  <form method="post" action="/search.asp" role="search" class="search-form">
+    <%= CsrfField() %>
     <label class="visually-hidden" for="q">Last name</label>
     <div class="input-group">
       <span class="input-group__icon"><%= Icon("search") %></span>

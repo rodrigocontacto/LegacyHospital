@@ -5,7 +5,8 @@ on IIS with SQL Server. Portfolio project that shows secure coding in a
 legacy Microsoft stack. All patient data is fake.
 
 ## Stack
-- Classic ASP + VBScript, IIS (site root: /web, http://localhost:8080)
+- Classic ASP + VBScript, IIS (site root: /web, https://localhost:44300;
+  http://localhost:8080 only redirects to HTTPS)
 - SQL Server Express, database LegacyHospital, T-SQL scripts in /db
 - Security tests: xUnit + HttpClient in /tests (.NET 8)
 
@@ -50,7 +51,7 @@ legacy Microsoft stack. All patient data is fake.
 - Styles live in web/assets/css/app.css. No inline style or script (CSP).
 
 ## Tooling
-- tools/run-local.ps1: start LocalDB + IIS Express on web/ (http://localhost:8080).
+- tools/run-local.ps1: start LocalDB + IIS Express on web/ (https://localhost:44300).
   -RebuildDatabase recreates the database and config/hospital.udl.
 - tests/asp-syntax-check.ps1: compile-only check of every page. Runs
   automatically after each Edit/Write of web/*.asp|asa (hook in

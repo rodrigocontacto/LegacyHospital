@@ -58,11 +58,11 @@ docs/                security review, screenshots
 |---|---|
 | **A01 Broken Access Control** | `RequireLogin` first on every page. Procedures filter by `@UserId` taken from the session, never from the request. "Does not exist" and "not yours" return the same 404 body, so record IDs cannot be enumerated. Adding a note checks ownership and inserts in one statement. |
 | **A03 Injection** | Every query is an `ADODB.Command` calling a stored procedure with typed parameters. The only dynamic SQL (`ORDER BY`) uses a whitelist in ASP and again in SQL, `QUOTENAME`, and `sp_executesql`, and runs as `app_dynamic_reader` (SELECT on two tables). Every value written to HTML goes through `Server.HTMLEncode`; attributes always use double quotes. |
-| **A07 Identification and Authentication Failures** | One generic login error; the password hash is computed even for unknown users so response time does not reveal them. 5 failures lock the account for 5 minutes (counter in the database, not the session). **Session fixation:** Classic ASP cannot regenerate the session ID, so login takes two requests with a one-time ticket and a fresh session (see `includes/core/auth.asp`). Session cookie `HttpOnly; SameSite=Lax`; app cookies `HttpOnly; SameSite=Strict`. |
+| **A07 Identification and Authentication Failures** | One generic login error; the password hash is computed even for unknown users so response time does not reveal them. Limits counted in the database: 30 failures from one IP in a minute → 429 (password spraying); 5 failed passwords for one username from one IP → that pair is locked for 15 minutes (no remote lockout of a doctor); 50 consecutive failures → account locked for 15 minutes. Sessions end after 8 hours, and within 5 minutes of a user being deactivated. **Session fixation:** Classic ASP cannot regenerate the session ID, so login takes two requests with a one-time ticket and a fresh session (see `includes/core/auth.asp`). Session cookie `HttpOnly; SameSite=Lax; Secure`; app cookies `HttpOnly; SameSite=Strict; Secure`. |
 | **A01 / CSRF** | Synchronizer token from `CRYPT_GEN_RANDOM` on every POST (including login and logout), compared in constant time. Logout is POST-only. |
 | **A05 Security Misconfiguration** | CSP without inline script or style, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`. `Server` and `X-Powered-By` removed. Custom error page; ASP error details never reach the browser (verified with the error page removed). Include files not reachable over HTTP. |
-| **A02 Cryptographic Failures** | Salted, iterated SHA2_512 password hashes; tokens from `CRYPT_GEN_RANDOM`, never `Rnd()`. Connection string outside the web root. See limitations below. |
-| **A09 Logging and Monitoring** | Technical error details logged to `AppErrorLog` (falls back to the IIS log if the database is down); users see a generic message. See limitations below. |
+| **A02 Cryptographic Failures** | HTTPS only: HTTP answers a 301 to HTTPS, plus `Strict-Transport-Security`. Salted, iterated SHA2_512 password hashes (≥ 100 ms each, versioned and upgraded on next login); tokens from `CRYPT_GEN_RANDOM`, never `Rnd()`. Connection string outside the web root, in a folder only the site's identity and administrators can read. See limitations below. |
+| **A09 Logging and Monitoring** | `SecurityAudit` records every sign-in attempt (with the reason, never shown to the user), CSRF failures, record views and denied record IDs, notes added, sign-outs and ended sessions, with user and IP. Technical error details go to `AppErrorLog` (falls back to the IIS log if the database is down); users see a generic message. Both logs are capped against floods and purged by age. |
 
 Design decisions and their reasons are in the code comments where they apply (for example `core/auth.asp` for the login ticket, `db/02_procedures.sql` for the dynamic `ORDER BY`).
 
@@ -78,11 +78,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-local.ps1 -Rebuild
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-local.ps1
 ```
 
-Open http://localhost:8080 and sign in as `dr.garcia`, `dr.smith` or `dr.chen` with the doctors' password the script printed.
+Open https://localhost:44300 (http://localhost:8080 redirects there; the certificate is the IIS Express development one) and sign in as `dr.garcia`, `dr.smith` or `dr.chen` with the doctors' password the script printed.
 
 From Visual Studio: open `LegacyHospital.sln`, set `login.asp` as start page and use **Ctrl+F5** (not F5: it offers to add `debug="true"` to `web.config`).
 
-To use SQL Server Express instead of LocalDB, run `db/01..04` with `sqlcmd` (each script explains its variables) and point `config/hospital.udl` to the server.
+To use SQL Server Express instead of LocalDB, run `db/01..04` with `sqlcmd` (each script explains its variables: passwords are passed as hex, and the seed requires `-v Environment=Dev`) and point `config/hospital.udl` to the server.
 
 ## Tests
 
@@ -90,25 +90,25 @@ To use SQL Server Express instead of LocalDB, run `db/01..04` with `sqlcmd` (eac
 # Compile-only check of every page with its includes (no code runs)
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\asp-syntax-check.ps1
 
-# 53 HTTP checks against the running site
+# 73 HTTP checks against the running site
 $env:LEGACYHOSPITAL_SEED_PASSWORD = '<doctors password>'
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\e2e-security.ps1
 ```
 
-The HTTP checks act like a browser and cover login and lockout messages, CSRF, session ID change on login, SQL injection and XSS payloads in search, IDOR on records and notes (including that no row is inserted), ID and date validation, the sort whitelist, stored XSS in notes, logout, security headers and cookie attributes.
+The HTTP checks act like a browser and cover the HTTPS redirect and HSTS, login and lockout messages, the per-IP rate limit and the per-IP + username lockout, CSRF, session ID change on login, search by POST only, SQL injection and XSS payloads in search, IDOR on records and notes (including that no row is inserted), audit rows, ID and date validation, the sort whitelist, stored XSS in notes, logout, security headers, cookie attributes and files outside the site root. The last checks trigger the rate limit: sign-ins from the machine get 429 for about a minute.
 
 ## Security review
 
 [`docs/security-review.md`](docs/security-review.md) lists 22 findings from a manual review, each with CWE, severity, vulnerable path and acceptance criteria, plus a verification log of how each closed one was tested.
 
-**Status:** 7 closed, 1 fixed pending verification, 14 open (4 medium, 9 low, 1 informational, none high).
+**Status:** all 22 closed; four with a documented residual risk (F-05, F-08, F-13, F-14).
 
 ## Known limitations
 
-- **Password hashing** is iterated SHA2_512, because neither SQL Server nor VBScript offers bcrypt or Argon2. It is weaker against offline cracking (F-05).
-- **No HTTPS** in the local setup (F-03); the `Secure` cookie rule is in place for when it is enabled.
-- **Lockout is per account**, not per IP, so password spraying is not throttled (F-04).
-- **No audit log** of logins or record views yet (F-06).
+- **Password hashing** is iterated SHA2_512 (≥ 100 ms per hash), because neither SQL Server nor VBScript offers bcrypt or Argon2. It is still weaker than those against GPU cracking (F-05).
+- **The `.udl` holds the `hospital_web` password** locally: IIS Express runs as the developer, so Windows authentication would not give a least-privilege identity. On full IIS, use the app pool identity instead (F-08).
+- **Rate limits use `REMOTE_ADDR`**. Behind a reverse proxy, IIS must see the real client address, or every user shares one IP and one limit.
+- Each anonymous request creates an in-memory ASP session; a request rate limit belongs in front of IIS (F-14).
 - The HTTP tests are PowerShell for now; they are meant to move to xUnit.
 
 ## How it was built

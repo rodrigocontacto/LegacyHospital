@@ -84,6 +84,10 @@ $asaPath = Join-Path $webRoot 'global.asa'
 if (Test-Path $asaPath) {
     $asa = [IO.File]::ReadAllText($asaPath)
     $asaCode = [regex]::Match($asa, '(?is)<SCRIPT[^>]*>(.*)</SCRIPT>').Groups[1].Value
+    # Option Explicit must be its first statement (CLAUDE.md, F-21). The
+    # wrapper below already starts with one, so the file's own is removed.
+    if ($asaCode -notmatch '\A\s*Option Explicit[ \t]*\r?\n') { $errors += 'global.asa: Option Explicit must be the first statement' }
+    $asaCode = [regex]::Replace($asaCode, '(?im)^[ \t]*Option Explicit[ \t]*\r?$', '')
     $err = Test-Vbs 'global.asa' ("Option Explicit : WScript.Quit`r`n" + $asaCode) $outDir
     if ($err) { $errors += "global.asa: $err" }
     $results += "{0,-14} {1}" -f 'global.asa', $(if ($err) { "ERROR  $err" } else { 'OK' })

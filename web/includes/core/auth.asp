@@ -23,15 +23,70 @@ Const LOGIN_TICKET_COOKIE = "LoginTicket"
 Const LOGIN_TICKET_PREFIX = "LoginTicket:"
 Const LOGIN_TICKET_SECONDS = 60
 
+' F-12: besides the 20-minute idle timeout (global.asa), a session ends
+' AUTH_SESSION_MAX_MINUTES after sign-in even if it is used all the
+' time, and the user's IsActive flag is re-read from the database every
+' AUTH_ACTIVE_CHECK_MINUTES: a deactivated doctor is out within minutes.
+Const AUTH_SESSION_MAX_MINUTES = 480
+Const AUTH_ACTIVE_CHECK_MINUTES = 5
+Const AUTH_SESSION_ENDED_URL = "/login.asp?ended=1"
+
 Function IsLoggedIn()
     IsLoggedIn = IsValidInteger(Session("UserId"))
 End Function
 
-' First call on every protected page. Ends the request if not logged in.
+' First call on every protected page. Ends the request if not logged in
+' or if the session has ended (absolute limit, user deactivated).
 Sub RequireLogin()
+    Dim endReason
     If Not IsLoggedIn() Then
         Response.Clear
         RedirectTo LOGIN_PAGE_URL
+    End If
+
+    endReason = SessionEndReason()
+    If Len(endReason) > 0 Then
+        RecordSecurityEvent AUDIT_EVENT_SESSION, AUDIT_OUTCOME_BLOCKED, Null, endReason
+        SignOut
+        Response.Clear
+        RedirectTo AUTH_SESSION_ENDED_URL
+    End If
+End Sub
+
+' "" while the session is valid; otherwise the reason it ended.
+' Session("LoginAt") is set at sign-in; a session without it (created
+' before this check existed) is ended too.
+Function SessionEndReason()
+    Dim loginAt, checkedAt
+    SessionEndReason = ""
+    loginAt = Session("LoginAt")
+    If VarType(loginAt) <> vbDate Then
+        SessionEndReason = "MissingLoginTime"
+    ElseIf DateDiff("n", loginAt, Now()) >= AUTH_SESSION_MAX_MINUTES Then
+        SessionEndReason = "AbsoluteTimeout"
+    Else
+        checkedAt = Session("ActiveCheckedAt")
+        If VarType(checkedAt) <> vbDate Then
+            checkedAt = DateAdd("n", -AUTH_ACTIVE_CHECK_MINUTES, Now())
+        End If
+        If DateDiff("n", checkedAt, Now()) >= AUTH_ACTIVE_CHECK_MINUTES Then
+            If Users_IsActive(CurrentUserId()) Then
+                Session("ActiveCheckedAt") = Now()
+            Else
+                SessionEndReason = "UserInactive"
+            End If
+        End If
+    End If
+End Function
+
+' Writes a security event for the current request (F-06): the signed-in
+' user (if any) and the client IP are added here. resourceId may be Null.
+Sub RecordSecurityEvent(ByVal eventType, ByVal outcome, ByVal resourceId, ByVal detail)
+    Dim userId
+    userId = Null
+    If IsLoggedIn() Then userId = CurrentUserId()
+    If Audit_Add(userId, ClientIpAddress(), eventType, outcome, resourceId, detail) <> 0 Then
+        HandleFatalError "Audit_Add rejected event " & eventType & "/" & outcome
     End If
 End Sub
 
@@ -80,6 +135,8 @@ Function CompleteLoginFromTicket()
     Session("UserId") = CLng(data(0))
     Session("FullName") = data(1)
     Session("Role") = data(2)
+    Session("LoginAt") = Now()
+    Session("ActiveCheckedAt") = Now()
     RedirectTo HOME_PAGE_URL
 End Function
 

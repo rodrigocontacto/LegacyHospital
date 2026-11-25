@@ -25,6 +25,10 @@ Function CsrfField()
 End Function
 
 ' Ends the request if the method is not POST or the token does not match.
+' F-14: a failure is a security event, not a technical error. It goes to
+' dbo.SecurityAudit (capped per IP, and counted by the login rate limit),
+' not to AppErrorLog, so anonymous POSTs without a token cannot flood the
+' error log. The user gets the same generic error page as before.
 Sub ValidateCsrfToken()
     Dim expected, received
     expected = Session(CSRF_SESSION_KEY) & ""
@@ -32,7 +36,10 @@ Sub ValidateCsrfToken()
     If Not IsPostRequest() _
        Or Len(expected) <> CSRF_TOKEN_LENGTH _
        Or Not ConstantTimeEquals(expected, received) Then
-        HandleFatalError "CSRF validation failed"
+        RecordSecurityEvent AUDIT_EVENT_CSRF, AUDIT_OUTCOME_FAILURE, Null, Left(CurrentPageName(), 50)
+        CloseConnection
+        Response.Clear
+        Response.Redirect ERROR_PAGE_URL
     End If
 End Sub
 

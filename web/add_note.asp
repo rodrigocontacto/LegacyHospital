@@ -13,6 +13,8 @@
 ' saving anything; another doctor's patient and a missing one get the
 ' same 404 as patient.asp. The procedure checks ownership again.
 ' The note is stored as plain text and encoded when it is displayed.
+' Audit (F-06): denied IDs and saved notes go to SecurityAudit. The GET
+' form is not a record view (it shows only the patient's name).
 ' =====================================================================
 RequireLogin
 
@@ -41,6 +43,7 @@ If IsPostRequest() Then
         resultCode = Notes_Add(CurrentUserId(), patientId, noteText)
         Select Case resultCode
             Case 0
+                RecordSecurityEvent AUDIT_EVENT_NOTE_ADD, AUDIT_OUTCOME_SUCCESS, patientId, Null
                 ' Fixed path + an ID already validated as an integer.
                 RedirectTo "/patient.asp?id=" & patientId & "&added=1"
             Case 1
@@ -54,6 +57,7 @@ End If
 ' Same status and text as patient.asp, so the response does not reveal
 ' whether the patient exists.
 Sub EndPatientNotFound()
+    RecordSecurityEvent AUDIT_EVENT_NOTE_ADD, AUDIT_OUTCOME_DENIED, patientId, "NotFoundOrNotAssigned"
     EndWithMessage "404 Not Found", "Patient not found", "The patient you requested was not found."
 End Sub
 %>

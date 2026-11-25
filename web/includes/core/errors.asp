@@ -36,6 +36,7 @@ Sub LogError(ByVal pageName, ByVal detail)
         Set cmd.ActiveConnection = conn
         cmd.CommandType = adCmdStoredProc
         cmd.CommandText = "app.usp_Error_Log"
+        cmd.NamedParameters = True
         cmd.CommandTimeout = DB_COMMAND_TIMEOUT
         cmd.Parameters.Append cmd.CreateParameter("@PageName", adVarWChar, adParamInput, 200, pageName)
         cmd.Parameters.Append cmd.CreateParameter("@ErrorDetail", adVarWChar, adParamInput, 4000, detail)
