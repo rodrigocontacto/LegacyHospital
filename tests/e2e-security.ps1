@@ -27,7 +27,9 @@
 #>
 param(
     [string]$BaseUrl = 'http://localhost:8080',
-    [string]$Password = $env:LEGACYHOSPITAL_SEED_PASSWORD
+    [string]$Password = $env:LEGACYHOSPITAL_SEED_PASSWORD,
+    # Used only to confirm that a rejected note was not inserted (Windows auth).
+    [string]$SqlServer = '(localdb)\MSSQLLocalDB'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,10 +79,15 @@ function Check($desc, $ok) {
 }
 
 # --- Preflight: the site must be running
-if ((Send GET '/login.asp').Status -ne 200) {
+$first = Send GET '/login.asp'
+if ($first.Status -ne 200) {
     Write-Error "Site not reachable at $base/login.asp. Start it first (see the run-local skill)."
     exit 1
 }
+
+# --- ASP session cookie attributes (F-02, URL Rewrite outbound rule)
+$sessionCookiePattern = 'ASPSESSIONID[A-Z]{8}=[^;,]+; path=/; HttpOnly; SameSite=Lax'
+Check 'ASP session cookie has HttpOnly; SameSite=Lax (F-02)' ($first.SetCookie -match $sessionCookiePattern)
 
 # --- Unauthenticated access
 $r = Send GET '/search.asp'
@@ -112,6 +119,8 @@ $r = Send POST '/login.asp' ("csrf_token=$token&username=dr.garcia&password=" + 
 Check 'login step 1: POST -> 302 login.asp' ($r.Status -eq 302 -and $r.Location -like '*login.asp*')
 $r = Send GET '/login.asp'
 Check 'login step 2: GET with ticket -> 302 search.asp' ($r.Status -eq 302 -and $r.Location -like '*search.asp*')
+Check 'login step 2: new session cookie has HttpOnly (F-02)' ($r.SetCookie -match $sessionCookiePattern)
+Check 'login step 2: LoginTicket deleted, attributes intact' ($r.SetCookie -match 'LoginTicket=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; HttpOnly; SameSite=Strict')
 $after = SessionId
 Check 'session ID changed after login (F-07)' ($before -ne $after -and $after -ne '')
 
@@ -139,6 +148,45 @@ foreach ($bad in @('abc', '-1', '1%20OR%201=1', '1&id=5', '007')) {
     $r = Send GET "/patient.asp?id=$bad"
     Check "patient id=$bad -> 400" ($r.Status -eq 400)
 }
+
+# --- Add note: CSRF, IDOR, validation, stored XSS
+# Each run adds two notes to patient 2 (O'Brien); no check depends on the count.
+function NoteCount([int]$patientId) {
+    if (-not (Get-Command sqlcmd -ErrorAction SilentlyContinue)) { return $null }
+    $value = (& sqlcmd -S $SqlServer -E -d LegacyHospital -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.PatientNotes WHERE PatientId = $patientId") -join ''
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return [int]$value.Trim()
+}
+
+$r = Send GET '/add_note.asp?id=2'
+$noteToken = Csrf $r.Body
+Check 'add_note own patient -> 200 form with CSRF token' ($r.Status -eq 200 -and $r.Body -like '*name="note_text"*' -and $noteToken.Length -eq 64)
+$r = Send GET '/add_note.asp?id=5'
+Check 'add_note other doctor -> 404, same body as patient.asp' ($r.Status -eq 404 -and $r.Body -eq $r5.Body)
+$r = Send GET '/add_note.asp?id=abc'
+Check 'add_note id=abc -> 400' ($r.Status -eq 400)
+$r = Send POST '/add_note.asp?id=2' ('note_text=' + (Enc 'no token'))
+Check 'add_note POST without CSRF token -> error.asp' ($r.Status -eq 302 -and $r.Location -like '*error.asp*')
+
+$before = NoteCount 5
+$r = Send POST '/add_note.asp?id=5' ("csrf_token=$noteToken&note_text=" + (Enc 'note on another doctor''s patient'))
+$after = NoteCount 5
+Check 'add_note POST to other doctor -> 404' ($r.Status -eq 404)
+if ($before -eq $null) { "{0,-58} {1}" -f 'add_note POST to other doctor -> no row inserted', 'SKIP (no sqlcmd)' }
+else { Check 'add_note POST to other doctor -> no row inserted' ($before -eq $after) }
+
+$r = Send POST '/add_note.asp?id=2' ("csrf_token=$noteToken&note_text=" + (Enc "   `r`n  "))
+Check 'add_note blank note -> validation message' ($r.Status -eq 200 -and $r.Body -like '*Write the note before saving.*')
+$r = Send POST '/add_note.asp?id=2' ("csrf_token=$noteToken&note_text=" + ('a' * 2001))
+Check 'add_note 2001 chars -> validation message, text kept' ($r.Body -like '*at most 2000 characters*' -and $r.Body -like ('*>' + ('a' * 2001) + '</textarea>*'))
+# 1998 chars + CRLF + 1 char = 2001 bytes sent, 2000 characters for the browser.
+$r = Send POST '/add_note.asp?id=2' ("csrf_token=$noteToken&note_text=" + ('b' * 1998) + '%0D%0Ac')
+Check 'add_note 2000 chars with CRLF -> saved (line breaks normalized)' ($r.Status -eq 302 -and $r.Location -like '*patient.asp?id=2&added=1*')
+$xssNote = '<img src=x onerror=alert(1)> e2e stored XSS test'
+$r = Send POST '/add_note.asp?id=2' ("csrf_token=$noteToken&note_text=" + (Enc $xssNote))
+Check 'add_note valid note -> 302 patient.asp?id=2&added=1' ($r.Status -eq 302 -and $r.Location -like '*patient.asp?id=2&added=1*')
+$r = Send GET '/patient.asp?id=2&added=1'
+Check 'stored note shown encoded, success message' ($r.Body -like '*&lt;img src=x onerror=alert(1)&gt; e2e stored XSS test*' -and $r.Body -notlike '*<img src=x*' -and $r.Body -like '*Note added.*')
 
 # --- Appointments report: whitelist, validation, encoding
 $r = Send GET '/report.asp'

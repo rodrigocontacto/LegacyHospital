@@ -1,8 +1,11 @@
 <%
 ' views/patient_view.asp
-' Variables: patient (one row), notes, noteCount, i
+' Variables: patient (one row), notes, noteCount, noteAdded, i
 WriteLayoutTop "Patient record", "patients"
 %>
+<% If noteAdded Then %>
+<div class="alert alert--success" role="status"><%= Icon("note") %><span>Note added.</span></div>
+<% End If %>
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="/search.asp">Patients</a>
   <span class="breadcrumb__sep" aria-hidden="true"><%= Icon("chevron") %></span>

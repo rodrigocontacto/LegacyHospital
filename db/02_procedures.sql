@@ -33,8 +33,15 @@ IF DATABASE_PRINCIPAL_ID(N'app_dynamic_reader') IS NULL
     CREATE USER app_dynamic_reader WITHOUT LOGIN;
 GO
 GRANT SELECT ON dbo.Patients TO app_dynamic_reader;
-GRANT SELECT ON dbo.PatientNotes TO app_dynamic_reader;
 GRANT SELECT ON dbo.Appointments TO app_dynamic_reader;
+GO
+
+/* F-15 cleanup for databases created by older versions of this script:
+   the notes report is no longer used, and without it app_dynamic_reader
+   does not need PatientNotes. */
+IF OBJECT_ID(N'app.usp_NoteReport_Get', N'P') IS NOT NULL
+    DROP PROCEDURE app.usp_NoteReport_Get;
+REVOKE SELECT ON dbo.PatientNotes FROM app_dynamic_reader;
 GO
 
 /* ===============================================================
@@ -319,62 +326,6 @@ BEGIN
         RETURN 1;
 
     SET @NoteId = SCOPE_IDENTITY();
-    RETURN 0;
-END
-GO
-
-/* Notes per patient of the logged-in doctor between two dates
-   (inclusive, max 366 days). Returns 2 for an invalid range. */
-CREATE OR ALTER PROCEDURE app.usp_NoteReport_Get
-    @UserId        INT,
-    @FromDate      DATE,
-    @ToDate        DATE,
-    @SortColumn    VARCHAR(30) = 'LastName',
-    @SortDirection VARCHAR(4)  = 'ASC'
-WITH EXECUTE AS N'app_dynamic_reader'
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DECLARE @OrderColumn SYSNAME,
-            @Direction   NVARCHAR(4),
-            @Sql         NVARCHAR(MAX);
-
-    IF @FromDate IS NULL OR @ToDate IS NULL OR @FromDate > @ToDate
-       OR DATEDIFF(DAY, @FromDate, @ToDate) > 366
-        RETURN 2;
-
-    SET @OrderColumn = CASE @SortColumn
-                           WHEN 'LastName'   THEN N'LastName'
-                           WHEN 'NoteCount'  THEN N'NoteCount'
-                           WHEN 'LastNoteAt' THEN N'LastNoteAt'
-                       END;
-    SET @Direction = CASE UPPER(@SortDirection)
-                         WHEN 'ASC'  THEN N'ASC'
-                         WHEN 'DESC' THEN N'DESC'
-                     END;
-
-    IF @OrderColumn IS NULL OR @Direction IS NULL
-        THROW 50001, N'Invalid sort column or direction.', 1;
-
-    SET @Sql = N'
-SELECT p.PatientId, p.MedicalRecordNumber, p.FirstName, p.LastName,
-       COUNT(*) AS NoteCount, MAX(n.CreatedAt) AS LastNoteAt
-FROM dbo.Patients AS p
-JOIN dbo.PatientNotes AS n ON n.PatientId = p.PatientId
-WHERE p.AssignedUserId = @UserId
-  AND n.CreatedAt >= @FromDate
-  AND n.CreatedAt < DATEADD(DAY, 1, @ToDate)
-GROUP BY p.PatientId, p.MedicalRecordNumber, p.FirstName, p.LastName
-ORDER BY ' + QUOTENAME(@OrderColumn) + N' ' + @Direction + N', p.PatientId;';
-
-    EXEC sys.sp_executesql
-        @Sql,
-        N'@UserId INT, @FromDate DATE, @ToDate DATE',
-        @UserId = @UserId,
-        @FromDate = @FromDate,
-        @ToDate = @ToDate;
-
     RETURN 0;
 END
 GO
