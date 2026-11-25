@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/asp-syntax-check.ps1 -Hook",
+            "timeout": 60,
+            "statusMessage": "Checking ASP syntax..."
+          }
+        ]
+      }
+    ]
+  }
+}

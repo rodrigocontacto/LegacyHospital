@@ -5,5 +5,8 @@
 # Visual Studio local state (IIS Express config, caches, indexes)
 .vs/
 
+# Personal Claude Code settings (shared ones live in .claude/settings.json)
+.claude/settings.local.json
+
 # Playwright MCP output
 .playwright-mcp/
