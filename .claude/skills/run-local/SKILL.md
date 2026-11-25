@@ -50,6 +50,12 @@ All checks must pass. If the seed password is not known, ask the user (or rebuil
 | Visual Studio shows old files | Solution Explorer > right-click `web` > Refresh Folder, or reopen `LegacyHospital.sln` |
 | `/includes/...`, `/global.asa`, `/web.config` reset the connection | Expected under IIS Express: request filtering blocks them |
 
-ASP error details in the browser come from IIS Express `scriptErrorSentToBrowser="true"`
-(finding F-01). Useful while debugging; tell the user to turn it off afterwards:
-`& "C:\Program Files\IIS Express\appcmd.exe" set config -section:system.webServer/asp /scriptErrorSentToBrowser:false /commit:apphost`
+The script starts IIS Express with its own config (`/config` + `/site`, in
+`%LOCALAPPDATA%\LegacyHospital\iisexpress`), never with `/path`: `/path` regenerates a
+temp config from the Program Files template on every start and would undo
+`scriptErrorSentToBrowser="false"` (finding F-01). Never re-enable it; the error detail
+is in `AppErrorLog`. After changing IIS settings, stop IIS Express (Q in its window) and
+run the script again.
+
+If Visual Studio adds `<system.web><compilation debug="true"/>` to `web/web.config`
+(it offers it on F5), remove it: start the site with Ctrl+F5 instead.

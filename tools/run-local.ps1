@@ -99,15 +99,50 @@ try { $conn.Open("File Name=$udlPath;"); $conn.Close() }
 catch { Fail "ADO could not connect with config\hospital.udl: $($_.Exception.Message)" }
 
 # ---- 5. IIS Express -----------------------------------------------------
+# A dedicated IIS Express config (outside the repo) instead of /path:
+# /path regenerates a temp config from the template in Program Files on
+# every start, so settings such as F-01 below would be lost.
+$appcmd = 'C:\Program Files\IIS Express\appcmd.exe'
+$siteName = 'LegacyHospital'
+$iisConfigDir = Join-Path $env:LOCALAPPDATA 'LegacyHospital\iisexpress'
+$iisConfig = Join-Path $iisConfigDir 'applicationhost.config'
+
+function Invoke-AppCmd([string[]]$appcmdArgs, [string]$config) {
+    $output = & $appcmd @appcmdArgs "/apphostconfig:$config" 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "appcmd $($appcmdArgs -join ' ') failed: $output" }
+}
+
+Step "Preparing IIS Express config ($iisConfig)"
+if (-not (Test-Path $iisConfig)) {
+    New-Item -ItemType Directory -Force $iisConfigDir | Out-Null
+    Copy-Item 'C:\Program Files\IIS Express\AppServer\applicationhost.config' $iisConfig
+}
+& $appcmd list site $siteName "/apphostconfig:$iisConfig" | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Invoke-AppCmd @('add', 'site', "/name:$siteName", "/physicalPath:$webRoot", "/bindings:http/:${Port}:localhost") $iisConfig
+}
+Invoke-AppCmd @('set', 'vdir', "$siteName/", "/physicalPath:$webRoot") $iisConfig
+Invoke-AppCmd @('set', 'site', $siteName, "/bindings:http/:${Port}:localhost") $iisConfig
+
+# F-01: never send ASP error details to the browser. The <asp> section is
+# locked for web.config, so it is set here and in the Visual Studio config
+# (.vs, used when the site runs from LegacyHospital.sln).
+Step 'Disabling ASP error details in the browser (F-01)'
+$apphostConfigs = @($iisConfig, (Join-Path $repoRoot '.vs\LegacyHospital\config\applicationhost.config')) |
+    Where-Object { Test-Path $_ }
+foreach ($config in $apphostConfigs) {
+    Invoke-AppCmd @('set', 'config', '-section:system.webServer/asp', '/scriptErrorSentToBrowser:false', '/commit:apphost') $config
+}
+
 if (Test-Site) {
-    Step "The site already answers on port $Port"
+    Step "The site already answers on port $Port (restart it to apply config changes)"
 }
 else {
     if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
         Fail "Port $Port is in use by something that is not this site. Stop it or use -Port."
     }
     Step "Starting IIS Express on port $Port (separate window; press Q there to stop it)"
-    Start-Process -FilePath $iisExpress -ArgumentList "/path:`"$webRoot`"", "/port:$Port" -WindowStyle Minimized | Out-Null
+    Start-Process -FilePath $iisExpress -ArgumentList "/config:`"$iisConfig`"", "/site:$siteName" -WindowStyle Minimized | Out-Null
     $deadline = (Get-Date).AddSeconds(20)
     while (-not (Test-Site)) {
         if ((Get-Date) -gt $deadline) { Fail "IIS Express started but $siteUrl does not answer. Check the IIS Express window." }
