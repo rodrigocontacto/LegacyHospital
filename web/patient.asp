@@ -14,7 +14,7 @@
 ' =====================================================================
 RequireLogin
 
-Dim idText, patientId, patient, notes, noteCount, i
+Dim idText, patientId, patient, notes, noteCount, noteAdded, i
 
 idText = Request.QueryString("id") & ""
 If Not IsValidInteger(idText) Then
@@ -29,6 +29,9 @@ End If
 
 notes = Notes_ListByPatient(CurrentUserId(), patientId)
 noteCount = RowCount(notes)
+
+' Set by add_note.asp after saving (POST-redirect-GET). Fixed message only.
+noteAdded = (Request.QueryString("added") = "1")
 %>
 <!--#include file="includes/views/patient_view.asp"-->
 <% CloseConnection %>

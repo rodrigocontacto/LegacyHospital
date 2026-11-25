@@ -52,6 +52,21 @@ Function IsHexToken(ByVal value)
     Set re = Nothing
 End Function
 
+' True for "", Null or text made only of spaces, tabs and line breaks.
+Function IsBlank(ByVal value)
+    Dim re
+    Set re = New RegExp
+    re.Pattern = "^\s*$"
+    IsBlank = re.Test(CStr(value & ""))
+    Set re = Nothing
+End Function
+
+' Browsers count a line break as one character (textarea maxlength) but
+' submit CRLF. Normalizing to LF keeps both length checks in agreement.
+Function NormalizeLineBreaks(ByVal value)
+    NormalizeLineBreaks = Replace(Replace(CStr(value & ""), vbCrLf, vbLf), vbCr, vbLf)
+End Function
+
 ' Exact, case-sensitive match against a whitelist array.
 Function IsInList(ByVal value, ByVal allowedValues)
     Dim allowed
