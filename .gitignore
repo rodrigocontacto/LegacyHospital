@@ -1,0 +1,9 @@
+# Connection strings and secrets (kept outside the web root).
+# Everything in /config is local-only; nothing there is committed.
+/config/*
+
+# Visual Studio local state (IIS Express config, caches, indexes)
+.vs/
+
+# Playwright MCP output
+.playwright-mcp/
