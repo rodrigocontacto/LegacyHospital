@@ -18,7 +18,30 @@ Sub SendSecurityHeaders()
     Response.AddHeader "Referrer-Policy", "no-referrer"
     ' Patient data must not stay in the browser or proxy cache.
     Response.CacheControl = "no-store"
+    ' F-03: once the browser has seen the site over HTTPS, it never uses
+    ' HTTP for it again (web.config redirects plain HTTP to HTTPS).
+    ' Browsers ignore this header over HTTP, so it is only sent on HTTPS.
+    ' HSTS applies to the host on every port: on localhost a long max-age
+    ' would force HTTPS on every other local project, so it stays short.
+    If IsHttps() Then
+        If LCase(Request.ServerVariables("SERVER_NAME") & "") = "localhost" Then
+            Response.AddHeader "Strict-Transport-Security", "max-age=300"
+        Else
+            Response.AddHeader "Strict-Transport-Security", "max-age=31536000"
+        End If
+    End If
 End Sub
+
+Function IsHttps()
+    IsHttps = (LCase(Request.ServerVariables("HTTPS") & "") = "on")
+End Function
+
+' The client's IP as seen by IIS (REMOTE_ADDR). X-Forwarded-For is never
+' used: any client can send it. Behind a reverse proxy, configure IIS
+' (or the proxy) so that REMOTE_ADDR is the real client.
+Function ClientIpAddress()
+    ClientIpAddress = Left(Request.ServerVariables("REMOTE_ADDR") & "", 45)
+End Function
 
 ' Trimmed query string value, or defaultValue when the parameter is
 ' absent. The caller still has to validate the result.
@@ -56,9 +79,7 @@ End Sub
 ' written as raw Set-Cookie headers. Secure is added under HTTPS.
 Function CookieAttributes()
     CookieAttributes = "; Path=/; HttpOnly; SameSite=Strict"
-    If LCase(Request.ServerVariables("HTTPS") & "") = "on" Then
-        CookieAttributes = CookieAttributes & "; Secure"
-    End If
+    If IsHttps() Then CookieAttributes = CookieAttributes & "; Secure"
 End Function
 
 ' Session cookie (no Expires). Only call with values we generated.

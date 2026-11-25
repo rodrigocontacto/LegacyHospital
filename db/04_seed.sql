@@ -7,11 +7,18 @@
       - patient "O'Brien": quotes must not break anything.
       - a note with <script>alert(1)</script>: must be shown encoded.
 
-    The doctors' password is a sqlcmd variable (never stored in the repo).
-    At least 12 characters, no single quote (').
+    The doctors' password is a sqlcmd variable (never stored in the repo),
+    at least 12 characters, passed as HEX of its UTF-16LE bytes for the
+    same reason as in 03_security.sql (F-16): any password works and a
+    value that is not hex stops the script before anything runs.
 
-    PowerShell (single quotes outside, double quotes inside):
-        sqlcmd -S .\SQLEXPRESS -E -b -i db\04_seed.sql -v 'SeedPassword="<password>"'
+    F-17: these are well-known usernames with a shared password. The
+    script refuses to run unless Environment is "Dev", so it cannot be
+    run against production by accident.
+
+    PowerShell:
+        $hex = -join ([Text.Encoding]::Unicode.GetBytes('<password>') | ForEach-Object { $_.ToString('X2') })
+        sqlcmd -S .\SQLEXPRESS -E -b -i db\04_seed.sql -v Environment=Dev "SeedPasswordHex=$hex"
 
     Safe to re-run: users are created only if missing; patients and
     notes only if Patients is empty; appointments only if Appointments
@@ -22,17 +29,30 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
 
+/* F-17. Without -v Environment=... sqlcmd itself stops here
+   ("'Environment' scripting variable not defined"). */
+IF N'$(Environment)' <> N'Dev'
+    THROW 50011, N'04_seed.sql creates demo users with a shared password. Run it only with -v Environment=Dev against a development database.', 1;
+GO
+
 USE LegacyHospital;
 GO
 
-DECLARE @Ignored INT;
+DECLARE @PasswordHex VARCHAR(MAX) = '$(SeedPasswordHex)';
+DECLARE @Password NVARCHAR(128), @Ignored INT;
+
+IF LEN(@PasswordHex) = 0 OR LEN(@PasswordHex) > 512 OR LEN(@PasswordHex) % 4 <> 0
+   OR @PasswordHex LIKE '%[^0-9A-Fa-f]%'
+    THROW 50010, N'SeedPasswordHex must be the password as UTF-16LE bytes in hex (see the header of this script).', 1;
+
+SET @Password = CAST(CONVERT(VARBINARY(256), @PasswordHex, 2) AS NVARCHAR(128));
 
 IF NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Username = N'dr.garcia')
-    EXEC dbo.usp_User_Create N'dr.garcia', N'Ana Garcia', N'$(SeedPassword)', @Ignored OUTPUT;
+    EXEC dbo.usp_User_Create N'dr.garcia', N'Ana Garcia', @Password, @Ignored OUTPUT;
 IF NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Username = N'dr.smith')
-    EXEC dbo.usp_User_Create N'dr.smith', N'John Smith', N'$(SeedPassword)', @Ignored OUTPUT;
+    EXEC dbo.usp_User_Create N'dr.smith', N'John Smith', @Password, @Ignored OUTPUT;
 IF NOT EXISTS (SELECT 1 FROM dbo.Users WHERE Username = N'dr.chen')
-    EXEC dbo.usp_User_Create N'dr.chen', N'Mei Chen', N'$(SeedPassword)', @Ignored OUTPUT;
+    EXEC dbo.usp_User_Create N'dr.chen', N'Mei Chen', @Password, @Ignored OUTPUT;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM dbo.Patients)

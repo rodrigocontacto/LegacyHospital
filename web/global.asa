@@ -1,4 +1,5 @@
 <SCRIPT LANGUAGE="VBScript" RUNAT="Server">
+Option Explicit
 ' =====================================================================
 ' global.asa - Application and session events.
 '

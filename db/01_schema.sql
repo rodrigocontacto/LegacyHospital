@@ -42,6 +42,8 @@ BEGIN
                          CONSTRAINT DF_Users_Role DEFAULT (N'Doctor'),
         PasswordHash     VARBINARY(64) NOT NULL,
         PasswordSalt     VARBINARY(32) NOT NULL,
+        HashVersion      TINYINT       NOT NULL
+                         CONSTRAINT DF_Users_HashVersion DEFAULT (1),
         FailedLoginCount INT           NOT NULL
                          CONSTRAINT DF_Users_FailedLoginCount DEFAULT (0),
         LockoutUntil     DATETIME2(0)  NULL,
@@ -61,9 +63,27 @@ BEGIN
         CONSTRAINT CK_Users_PasswordSalt
             CHECK (DATALENGTH(PasswordSalt) = 32),
         CONSTRAINT CK_Users_FailedLoginCount
-            CHECK (FailedLoginCount >= 0)
+            CHECK (FailedLoginCount >= 0),
+        CONSTRAINT CK_Users_HashVersion
+            CHECK (HashVersion IN (1, 2))
     );
 END
+GO
+
+/* F-05 upgrade for databases created by older versions of this script.
+   HashVersion says how many iterations produced PasswordHash
+   (dbo.ufn_Password_Iterations); existing hashes are version 1 and are
+   rehashed with the current version on the user's next login. */
+IF COL_LENGTH(N'dbo.Users', N'HashVersion') IS NULL
+BEGIN
+    ALTER TABLE dbo.Users
+        ADD HashVersion TINYINT NOT NULL
+            CONSTRAINT DF_Users_HashVersion DEFAULT (1);
+END
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_Users_HashVersion')
+    ALTER TABLE dbo.Users
+        ADD CONSTRAINT CK_Users_HashVersion CHECK (HashVersion IN (1, 2));
 GO
 
 /* ---------------------------------------------------------------
@@ -195,6 +215,69 @@ BEGIN
         UserId      INT            NULL
     );
 END
+GO
+
+/* Retention purge and the flood cap in app.usp_Error_Log (F-14). */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = N'IX_AppErrorLog_CreatedAt'
+                 AND object_id = OBJECT_ID(N'dbo.AppErrorLog'))
+    CREATE INDEX IX_AppErrorLog_CreatedAt ON dbo.AppErrorLog (CreatedAt);
+GO
+
+/* ---------------------------------------------------------------
+   SecurityAudit: security events (F-06). Who did what, from where,
+   with which outcome: sign-ins, CSRF failures, record views and
+   denied access, notes added, sign-outs, ended sessions.
+   Also the source of the login rate limits (F-04, F-13).
+
+   EventType  Login, Logout, CsrfCheck, PatientView, NoteAdd, Session
+   Outcome    Success, Failure (bad input or credentials),
+              Denied (not found / not yours), Blocked (rate limit,
+              lockout, ended session)
+   Username   the name typed on the login form (may not exist)
+   IpAddress  REMOTE_ADDR only; X-Forwarded-For is never trusted
+   ResourceId the patient, for PatientView and NoteAdd
+
+   No foreign keys on purpose: auditing must never fail.
+   --------------------------------------------------------------- */
+IF OBJECT_ID(N'dbo.SecurityAudit', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SecurityAudit
+    (
+        AuditId    BIGINT IDENTITY(1,1) NOT NULL
+                   CONSTRAINT PK_SecurityAudit PRIMARY KEY,
+        CreatedAt  DATETIME2(3)  NOT NULL
+                   CONSTRAINT DF_SecurityAudit_CreatedAt DEFAULT (SYSUTCDATETIME()),
+        EventType  VARCHAR(20)   NOT NULL,
+        Outcome    VARCHAR(10)   NOT NULL,
+        UserId     INT           NULL,
+        Username   NVARCHAR(50)  NULL,
+        IpAddress  VARCHAR(45)   NOT NULL,
+        ResourceId INT           NULL,
+        Detail     VARCHAR(50)   NULL,
+
+        CONSTRAINT CK_SecurityAudit_EventType
+            CHECK (EventType IN ('Login', 'Logout', 'CsrfCheck', 'PatientView', 'NoteAdd', 'Session')),
+        CONSTRAINT CK_SecurityAudit_Outcome
+            CHECK (Outcome IN ('Success', 'Failure', 'Denied', 'Blocked'))
+    );
+END
+GO
+
+/* Rate limits: failures per IP, and per IP + username. */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = N'IX_SecurityAudit_IpAddress_CreatedAt'
+                 AND object_id = OBJECT_ID(N'dbo.SecurityAudit'))
+    CREATE INDEX IX_SecurityAudit_IpAddress_CreatedAt
+        ON dbo.SecurityAudit (IpAddress, CreatedAt)
+        INCLUDE (EventType, Outcome, Username);
+GO
+
+/* Investigations ("who viewed this patient") and the retention purge. */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = N'IX_SecurityAudit_CreatedAt'
+                 AND object_id = OBJECT_ID(N'dbo.SecurityAudit'))
+    CREATE INDEX IX_SecurityAudit_CreatedAt ON dbo.SecurityAudit (CreatedAt);
 GO
 
 PRINT N'01_schema.sql completed.';

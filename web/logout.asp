@@ -13,6 +13,7 @@ RequireLogin
 If Not IsPostRequest() Then RedirectTo HOME_PAGE_URL
 
 ValidateCsrfToken
+RecordSecurityEvent AUDIT_EVENT_LOGOUT, AUDIT_OUTCOME_SUCCESS, Null, Null
 SignOut
 RedirectTo LOGIN_PAGE_URL & "?signedout=1"
 %>

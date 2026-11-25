@@ -11,6 +11,9 @@
 '     request value). Another doctor's patient returns no rows, exactly
 '     like a patient that does not exist.
 '   - Both cases answer the same 404 page.
+' Audit (F-06): every view and every denied ID is written to
+' SecurityAudit (who viewed which patient; IDOR probing shows up as a
+' run of Denied rows).
 ' =====================================================================
 RequireLogin
 
@@ -24,8 +27,10 @@ patientId = CLng(idText)
 
 patient = Patients_Get(CurrentUserId(), patientId)
 If Not IsArray(patient) Then
+    RecordSecurityEvent AUDIT_EVENT_PATIENT_VIEW, AUDIT_OUTCOME_DENIED, patientId, "NotFoundOrNotAssigned"
     EndWithMessage "404 Not Found", "Patient not found", "The patient you requested was not found."
 End If
+RecordSecurityEvent AUDIT_EVENT_PATIENT_VIEW, AUDIT_OUTCOME_SUCCESS, patientId, Null
 
 notes = Notes_ListByPatient(CurrentUserId(), patientId)
 noteCount = RowCount(notes)

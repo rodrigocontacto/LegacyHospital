@@ -90,8 +90,13 @@ End Function
 
 ' Returns an ADODB.Command ready to run a stored procedure.
 ' The first parameter is always @RETURN_VALUE (read it with
-' GetReturnValue). Parameters bind BY POSITION: append them in the same
-' order as the procedure declares them.
+' GetReturnValue).
+' F-18: parameters bind BY NAME (NamedParameters), so the order in which
+' they are appended does not matter, and a misspelled name fails with
+' "expects parameter ... which was not supplied" instead of silently
+' sending a value to the wrong parameter (e.g. PatientId as @UserId).
+' Verified with MSOLEDBSQL19: appended in reverse order, by position
+' returns no rows; by name returns the right row.
 Function CreateSpCommand(ByVal procName)
     Dim cmd
     If Not IsAllowedProcName(procName) Then
@@ -101,6 +106,7 @@ Function CreateSpCommand(ByVal procName)
     Set cmd.ActiveConnection = GetConnection()
     cmd.CommandType = adCmdStoredProc
     cmd.CommandText = procName
+    cmd.NamedParameters = True
     cmd.CommandTimeout = DB_COMMAND_TIMEOUT
     cmd.Parameters.Append cmd.CreateParameter("@RETURN_VALUE", adInteger, adParamReturnValue)
     Set CreateSpCommand = cmd

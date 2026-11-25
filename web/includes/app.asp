@@ -28,6 +28,7 @@
 <!--#include file="core/auth.asp"-->
 <!--#include file="data/tokens.asp"-->
 <!--#include file="data/users.asp"-->
+<!--#include file="data/audit.asp"-->
 <!--#include file="data/patients.asp"-->
 <!--#include file="data/notes.asp"-->
 <!--#include file="data/appointments.asp"-->
